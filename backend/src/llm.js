@@ -93,22 +93,26 @@ export async function generateEmailViaLLM(payload) {
         const usage = data?.usage || {};
         const requestId = data?.id || null;
 
-        // Log to Langfuse (async, don't await)
-        logToLangfuse({
-            traceId,
-            observationId,
-            modelId: chosenModelId,
-            startTime: new Date(start).toISOString(),
-            endTime: new Date(end).toISOString(),
-            systemPrompt,
-            userPrompt: prompt,
-            output: content,
-            usage,
-            requestId,
-            latencyMs,
-            companyContext,
-            userInfo
-        }).catch(err => console.error('[LLM] Langfuse logging failed:', err));
+        // Log to Langfuse (await to ensure completion in serverless env)
+        try {
+            await logToLangfuse({
+                traceId,
+                observationId,
+                modelId: chosenModelId,
+                startTime: new Date(start).toISOString(),
+                endTime: new Date(end).toISOString(),
+                systemPrompt,
+                userPrompt: prompt,
+                output: content,
+                usage,
+                requestId,
+                latencyMs,
+                companyContext,
+                userInfo
+            });
+        } catch (err) {
+            console.error('[LLM] Langfuse logging failed:', err);
+        }
 
         return {
             ok: true,

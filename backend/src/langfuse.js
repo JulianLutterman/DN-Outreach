@@ -3,7 +3,7 @@
 import { LANGFUSE_HOST, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY } from './config.js';
 
 function lfAuthHeader() {
-    return 'Basic ' + btoa(`${LANGFUSE_PUBLIC_KEY}:${LANGFUSE_SECRET_KEY}`);
+    return 'Basic ' + Buffer.from(`${LANGFUSE_PUBLIC_KEY}:${LANGFUSE_SECRET_KEY}`).toString('base64');
 }
 
 export async function langfuseIngest(batch, metadata) {

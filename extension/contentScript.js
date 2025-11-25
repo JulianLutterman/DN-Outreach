@@ -905,32 +905,10 @@
                     modelId
                 });
 
-                // Status simulation to mimic original granular updates
-
-                // Status simulation to mimic original granular updates
-                let progressInterval;
-                const simulateProgress = () => {
-                    const steps = [
-                        'Analyzing company website...',
-                        'Searching for founder information...',
-                        'Fetching Notion templates...',
-                        'Enriching contact details...',
-                        `Drafting email via ${modelLabel}...`
-                    ];
-                    let i = 0;
-                    ui.setStatus(steps[0], widgetQuery);
-                    return setInterval(() => {
-                        i = (i + 1) % steps.length;
-                        // Don't cycle back to start if we're deep in the process, just stay on drafting
-                        if (i === 0) i = steps.length - 1;
-                        ui.setStatus(steps[i], widgetQuery);
-                    }, 2500);
-                };
-
-                progressInterval = simulateProgress();
+                // Status simulation removed. Using real-time updates via SSE.
 
                 try {
-                    // Call comprehensive backend endpoint
+                    // Call comprehensive backend endpoint with streaming
                     const response = await fetch(`${BACKEND_URL}/api/email/generate-complete`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -942,9 +920,57 @@
                         })
                     });
 
-                    clearInterval(progressInterval);
+                    if (!response.ok) {
+                        const errText = await response.text();
+                        let errMsg = 'Unknown backend error';
+                        try {
+                            const json = JSON.parse(errText);
+                            errMsg = json.error || errMsg;
+                        } catch (e) {
+                            errMsg = errText || errMsg;
+                        }
+                        throw new Error(errMsg);
+                    }
 
-                    const result = await response.json();
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+                    let result = null;
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split('\n\n');
+                        buffer = lines.pop(); // Keep incomplete chunk
+
+                        for (const line of lines) {
+                            if (line.startsWith('data: ')) {
+                                const jsonStr = line.slice(6);
+                                try {
+                                    const event = JSON.parse(jsonStr);
+                                    if (event.type === 'progress') {
+                                        ui.setStatus(event.message, widgetQuery);
+                                    } else if (event.type === 'result') {
+                                        result = event.data;
+                                    } else if (event.type === 'error') {
+                                        throw new Error(event.error);
+                                    }
+                                } catch (e) {
+                                    console.warn('[Specter-Outreach] Failed to parse SSE event:', e);
+                                    if (e.message !== 'Unexpected end of JSON input') {
+                                        // If it's a real error from the stream, rethrow
+                                        if (jsonStr.includes('"type":"error"')) throw e;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (!result) {
+                        throw new Error('Stream ended without result');
+                    }
 
                     if (!result.ok) {
                         throw new Error(result.error || 'Unknown backend error');
@@ -996,7 +1022,6 @@
                     ui.setStatus('Email generated successfully!', widgetQuery);
 
                 } catch (e) {
-                    clearInterval(progressInterval);
                     console.error('[Specter-Outreach] Generation error:', e);
                     ui.setStatus('Error: ' + e.message, widgetQuery);
                 }

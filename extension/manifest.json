@@ -1,0 +1,46 @@
+{
+  "manifest_version": 3,
+  "name": "DN Outreach",
+  "description": "Generate & send personalised outreach e-mails from Specter company pages, with optional auto follow-up.",
+  "version": "1.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApQ+1P6DqZL2pqgDU3jU6cqqw5nLpysxBaFwqoclRjIg/QhoYKym+af3HVKN5vI52D9W0rwETQd+sbyzTARE67akwtwRbkBbC6DsvfMT0XeUZtbVZU6JsDbgb4ajZ1mfpUG2F5fLV0y3BJd/UlJJiZudy5i48WefEB6AsaBXYYiH1/AlGwCDWuBaAxA9izTgkW8LAWs5t6PD0UcBtAbAgJZq6xEYX3X4RBH+CzCrVDRUr54aJqYXoCYpqPTKfKIToYM9YhpePzZASzIY4LRzrbRZGAm3Qo9G8HrwUtsHzPKcq9AWp+inSJvkn5PYvfykeCJ0+p6o0Fjv7pAbowfEp5wIDAQAB",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "identity",
+    "identity.email",
+    "notifications"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*",
+    "https://cloud.langfuse.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "workflowUtils.js",
+        "content-scripts/config.js",
+        "content-scripts/utils.js",
+        "content-scripts/ui.js",
+        "content-scripts/extraction.js",
+        "content-scripts/llm.js",
+        "content-scripts/workflow.js",
+        "content-scripts/auth.js",
+        "content-scripts/state.js"
+      ],
+      "matches": [ "<all_urls>" ]
+    }
+  ],
+  "action": {
+    "default_title": "Specter Outreach"
+  },
+  "icons": {
+    "16": "icons/icon16.png"
+  }
+}

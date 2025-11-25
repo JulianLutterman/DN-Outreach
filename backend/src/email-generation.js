@@ -18,7 +18,7 @@ import {
     extractDomainFromUrl
 } from './utils.js';
 
-export async function generateCompleteEmail(payload) {
+export async function generateCompleteEmail(payload, onProgress = () => { }) {
     const {
         companyContext,
         calendlyLink = '',
@@ -36,6 +36,7 @@ export async function generateCompleteEmail(payload) {
 
     try {
         // Step 1: Start Parallel founder task
+        onProgress('Starting Parallel founder task...');
         console.log('[Email Generation] Starting Parallel founder task for:', companyContext.website);
         const parallelStartResult = await startParallelFounderTask({ websiteLink: companyContext.website });
 
@@ -47,6 +48,7 @@ export async function generateCompleteEmail(payload) {
         const runId = parallelStartResult.runId;
 
         // Step 2: Fetch Notion content and Firecrawl in parallel
+        onProgress('Fetching Notion templates & crawling site...');
         console.log('[Email Generation] Fetching Notion and Firecrawl in parallel');
         const [notionResult, crawlResult] = await Promise.allSettled([
             (async () => {
@@ -72,6 +74,7 @@ export async function generateCompleteEmail(payload) {
             : null;
 
         // Step 3: Wait for Parallel founder result
+        onProgress('Waiting for founder data...');
         console.log('[Email Generation] Waiting for Parallel founder result');
         const parallelResult = await waitForParallelFounderResult({ runId });
 
@@ -92,6 +95,7 @@ export async function generateCompleteEmail(payload) {
         const domain = companyContext.domain || extractDomainFromUrl(companyContext.website || '');
 
         if (firstName && lastName && domain) {
+            onProgress('Enriching contact details...');
             console.log('[Email Generation] Enriching founder contact with Hunter');
             const hunterResult = await enrichFounderContact({
                 firstName,
@@ -163,6 +167,7 @@ export async function generateCompleteEmail(payload) {
         const systemPrompt = systemPromptLines.join('\n');
 
         // Step 6: Generate email via LLM
+        onProgress('Drafting email via LLM...');
         console.log('[Email Generation] Generating email via LLM');
         const llmResult = await generateEmailViaLLM({
             companyContext: enrichedCompanyContext,

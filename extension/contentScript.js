@@ -1004,8 +1004,8 @@
 
                         // Update UI fields if they exist
                         const fName = widgetQuery('#founderName');
-                        const fEmail = widgetQuery('#founderEmail');
-                        const fLinkedin = widgetQuery('#founderLinkedin');
+                        const fEmail = widgetQuery('#to');
+                        const fLinkedin = widgetQuery('#linkedin');
 
                         if (fName) fName.value = founder.fullName || '';
                         if (fEmail) fEmail.value = founder.email || '';

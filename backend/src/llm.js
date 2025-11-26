@@ -1,223 +1,210 @@
-// backend/src/email-generation.js
+// backend/src/llm.js
 
-import { generateEmailViaLLM } from './llm.js';
-import { crawlWebsite } from './firecrawl.js';
-import {
-    startParallelFounderTask,
-    waitForParallelFounderResult
-} from './parallel.js';
-import { enrichFounderContact } from './hunter.js';
-import {
-    resolveContentPageIdsForUser,
-    fetchNotionPageContent
-} from './notion.js';
-import {
-    escapeRegExp,
-    splitFullName,
-    ensureHttpUrl,
-    extractDomainFromUrl
-} from './utils.js';
+import { randomUUID } from 'node:crypto';
+import { langfuseIngest } from './langfuse.js';
+import { ensureHttpUrl } from './utils.js';
 
-export async function generateCompleteEmail(payload, onProgress = () => { }) {
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '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';
+const DEFAULT_MODEL_ID = 'deepseek/deepseek-v3.1-terminus';
+
+export function makePrompt(companyContext, crawlData, calendly, userInfo) {
+    const context = companyContext || {};
+    const founder = context?.founder || {};
+    const userName = ((userInfo?.firstName || '') + ' ' + (userInfo?.lastName || '')).trim() || '[Your Name]';
+
+    const companyName = (context?.companyName || '').trim() || 'Unknown Company';
+    const website = (context?.website || '').trim() || 'N/A';
+    const founderName = (founder?.fullName || '').trim() || 'Name unavailable';
+    const founderLinkedIn = founder?.linkedin ? ensureHttpUrl(founder.linkedin) : 'LinkedIn profile unavailable.';
+    const founderExperience = (founder?.relevantExperience || '').trim() || 'Relevant experience unavailable.';
+    const websiteInsights = crawlData
+        ? '### Website Crawl Insights (Most Important Information):\n' + crawlData
+        : 'No additional website insights were gathered.';
+
+    const promptContextLines = [
+        '',
+        '        ### Company Overview',
+        '        - **Name:** ' + companyName,
+        '        - **Website:** ' + website,
+        '',
+        '        ### Founder Background',
+        '        - **Name:** ' + founderName,
+        '        - **LinkedIn:** ' + founderLinkedIn,
+        '        - **Relevant Experience:** ' + founderExperience,
+        '',
+        '        ' + websiteInsights,
+        '',
+        '        ### Your Information (The Sender)',
+        '        - Your Name: ' + userName,
+        '        - Your Calendly Link: ' + (calendly || 'N/A'),
+        '        ',
+    ];
+    return promptContextLines.join('\n').trim();
+}
+
+export async function generateEmailViaLLM(payload) {
     const {
         companyContext,
-        calendlyLink = '',
-        userInfo = {},
-        modelId = 'deepseek/deepseek-v3.1-terminus'
+        crawlData,
+        calendlyLink,
+        userInfo,
+        systemPrompt,
+        modelId
     } = payload;
 
-    const result = {
-        ok: false,
-        subject: '',
-        body: '',
-        founderContact: null,
-        error: null
-    };
+    const chosenModelId = modelId || DEFAULT_MODEL_ID;
+    const prompt = makePrompt(companyContext, crawlData, calendlyLink, userInfo);
+
+    const traceId = randomUUID();
+    const observationId = randomUUID();
+    const start = Date.now();
 
     try {
-        // Step 1: Start Parallel founder task
-        onProgress('Starting Parallel founder task...');
-        console.log('[Email Generation] Starting Parallel founder task for:', companyContext.website);
-        const parallelStartResult = await startParallelFounderTask({ websiteLink: companyContext.website });
-
-        if (!parallelStartResult.ok) {
-            result.error = 'Parallel task failed: ' + (parallelStartResult.error || 'unknown');
-            return result;
-        }
-
-        const runId = parallelStartResult.runId;
-
-        // Step 2: Fetch Notion content and Firecrawl in parallel
-        onProgress('Fetching Notion templates & crawling site...');
-        console.log('[Email Generation] Fetching Notion and Firecrawl in parallel');
-        const [notionResult, crawlResult] = await Promise.allSettled([
-            (async () => {
-                const pageIds = await resolveContentPageIdsForUser(userInfo);
-                const [taskDescription, portfolio, exampleEmails] = await Promise.all([
-                    fetchNotionPageContent(pageIds.taskDescriptionId),
-                    fetchNotionPageContent(pageIds.portfolioId),
-                    fetchNotionPageContent(pageIds.exampleEmailsId)
-                ]);
-                return { taskDescription, portfolio, exampleEmails };
-            })(),
-            crawlWebsite(companyContext.website)
-        ]);
-
-        if (notionResult.status !== 'fulfilled') {
-            result.error = 'Notion fetch failed: ' + (notionResult.reason?.message || notionResult.reason);
-            return result;
-        }
-
-        const notionContent = notionResult.value;
-        const crawlData = crawlResult.status === 'fulfilled' && crawlResult.value?.ok
-            ? crawlResult.value.data
-            : null;
-
-        // Step 3: Wait for Parallel founder result
-        onProgress('Waiting for founder data...');
-        console.log('[Email Generation] Waiting for Parallel founder result');
-        const parallelResult = await waitForParallelFounderResult({ runId });
-
-        if (!parallelResult.ok) {
-            result.error = 'Parallel task did not complete: ' + (parallelResult.error || 'unknown');
-            return result;
-        }
-
-        let founderOutput = parallelResult.data || {};
-        if (typeof founderOutput === 'string') {
-            try {
-                founderOutput = JSON.parse(founderOutput);
-            } catch (e) {
-                console.warn('[Email Generation] Failed to parse Parallel output:', e);
-                founderOutput = {};
-            }
-        }
-
-        console.log('[Email Generation] Parallel founder output:', founderOutput);
-
-        const founderName = String(founderOutput?.first_last_name || '').trim();
-        const linkedinLink = (founderOutput?.linkedin_profile || '').trim();
-        const relevantExperience = String(founderOutput?.relevant_experience || '').trim();
-
-        const { firstName, lastName } = splitFullName(founderName);
-
-        // Step 4: Enrich founder email with Hunter
-        let enrichedEmail = '';
-        const domain = companyContext.domain || extractDomainFromUrl(companyContext.website || '');
-
-        if (firstName && lastName && domain) {
-            onProgress('Enriching contact details...');
-            console.log('[Email Generation] Enriching founder contact with Hunter');
-            const hunterResult = await enrichFounderContact({
-                firstName,
-                lastName,
-                companyName: companyContext.companyName || '',
-                domain,
-                existingLinkedIn: linkedinLink || ''
-            });
-
-            if (hunterResult.ok && hunterResult.email) {
-                enrichedEmail = hunterResult.email;
-            }
-        }
-
-        // Update company context with founder info
-        const enrichedCompanyContext = {
-            ...companyContext,
-            founder: {
-                fullName: founderName,
-                firstName,
-                lastName,
-                linkedin: linkedinLink,
-                relevantExperience
-            }
-        };
-
-        result.founderContact = {
-            fullName: founderName,
-            firstName,
-            lastName,
-            email: enrichedEmail || '',
-            linkedin: linkedinLink ? ensureHttpUrl(linkedinLink) : '',
-            domain: domain || '',
-            relevantExperience
-        };
-
-        // Step 5: Build system prompt from Notion content
-        const { taskDescription, portfolio, exampleEmails } = notionContent;
-        const userInfoForPrompt = {
-            firstName: userInfo.firstName || '[Your First Name]',
-            lastName: userInfo.lastName || '[Your Last Name]'
-        };
-
-        const finalTaskDescription = taskDescription
-            .replace(/\$\{userInfo\.firstName\s*\|\|\s*'\[Your First Name\]'\}/g, userInfoForPrompt.firstName)
-            .replace(/\$\{userInfo\.lastName\s*\|\|\s*'\[Your Last Name\]'\}/g, userInfoForPrompt.lastName);
-
-        const systemPromptLines = [
-            '',
-            '        You are an expert VC associate working at DN Capital writing a personalized, concise, and friendly cold-outreach email (max 150 words) to a company\'s CEO. NEVER use the em-dash "-" in your email, using the em-dash "-" is forbidden! You will receive more information on the specific company from the user, and you should follow these instructions:',
-            '',
-            '        ' + finalTaskDescription,
-            '',
-            "        When drafting the message, explicitly weave in the founder's most relevant prior experiences provided in the context to show nuanced understanding.",
-            '',
-            '        **Format your entire response like this, with no other text before or after:**',
-            '',
-            '        Subject: [Your generated subject line here]',
-            '',
-            '        [Your generated email body here, starting with "Hi [First Name]," or similar]',
-            '',
-            '        Also, here is some reference information on our portcos, as well as example cold emails (you need to replicate the writing style and structure in your output emails, although you can do the customizations more thorough/deep than in the examples):',
-            '',
-            '        ' + portfolio,
-            '',
-            '        ' + exampleEmails,
-            '    ',
-        ];
-        const systemPrompt = systemPromptLines.join('\n');
-
-        // Step 6: Generate email via LLM
-        onProgress('Drafting email via LLM...');
-        console.log('[Email Generation] Generating email via LLM');
-        const llmResult = await generateEmailViaLLM({
-            companyContext: enrichedCompanyContext,
-            crawlData,
-            calendlyLink,
-            userInfo,
-            systemPrompt,
-            modelId
+        const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + OPENROUTER_API_KEY,
+                'HTTP-Referer': 'https://dnoutreach.vercel.app',
+                'X-Title': 'DNOutreach Backend'
+            },
+            body: JSON.stringify({
+                model: chosenModelId,
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: prompt }
+                ],
+                reasoning: {
+                    max_tokens: 64000,
+                    exclude: true
+                },
+                temperature: 0.6
+            })
         });
 
-        if (!llmResult.ok) {
-            result.error = 'LLM generation failed: ' + (llmResult.error || 'unknown');
-            return result;
+        const data = await res.json();
+        const content = data?.choices?.[0]?.message?.content || '';
+
+        if (!content) {
+            throw new Error('OpenRouter returned an empty response.');
         }
 
-        const fullResponse = llmResult.content;
+        const end = Date.now();
+        const latencyMs = end - start;
+        const usage = data?.usage || {};
+        const requestId = data?.id || null;
 
-        // Step 7: Parse response and process Calendly links
-        const subjectMatch = fullResponse.match(/^Subject: (.*)/);
-        const subject = subjectMatch ? subjectMatch[1] : 'Following up';
-        let body = fullResponse.replace(/^Subject: .*\n\n?/, '');
-
-        if (calendlyLink) {
-            const url = calendlyLink.match(/^https?:\/\//i) ? calendlyLink : `https://${calendlyLink}`;
-            const anchor = `<a href="${url}">here is my Calendly</a>`;
-            const cleanCalendly = calendlyLink.replace(/^https?:\/\//i, '');
-            const regex = new RegExp(`(here\\s+is\\s+my\\s+Calendly[:\\s]*)?(https?:\\/\\/)?${escapeRegExp(cleanCalendly)}`, 'gi');
-            body = body.replace(regex, anchor);
+        // Log to Langfuse (await to ensure completion in serverless env)
+        try {
+            await logToLangfuse({
+                traceId,
+                observationId,
+                modelId: chosenModelId,
+                startTime: new Date(start).toISOString(),
+                endTime: new Date(end).toISOString(),
+                systemPrompt,
+                userPrompt: prompt,
+                output: content,
+                usage,
+                requestId,
+                latencyMs,
+                companyContext,
+                userInfo,
+                calendlyLink // Pass calendlyLink for metadata
+            });
+        } catch (err) {
+            console.error('[LLM] Langfuse logging failed:', err);
         }
 
-        result.ok = true;
-        result.subject = subject;
-        result.body = body;
-
-        return result;
-
+        return {
+            ok: true,
+            content,
+            usage,
+            latencyMs
+        };
     } catch (error) {
-        console.error('[Email Generation] Error:', error);
-        result.error = error.message || 'Unknown error during email generation';
-        return result;
+        console.error('[LLM] OpenRouter API error:', error);
+        return {
+            ok: false,
+            error: error.message
+        };
     }
+}
+
+async function logToLangfuse(logData) {
+    const {
+        traceId,
+        observationId,
+        modelId,
+        startTime,
+        endTime,
+        systemPrompt,
+        userPrompt,
+        output,
+        usage,
+        requestId,
+        latencyMs,
+        companyContext,
+        userInfo
+    } = logData;
+
+    const preview = (txt, n = 400) => (typeof txt === 'string' ? (txt.length > n ? txt.slice(0, n) + '...' : txt) : null);
+
+    // Logic aligned with reference example
+    const batch = [
+        {
+            id: randomUUID(),
+            timestamp: startTime,
+            type: 'trace-create',
+            body: {
+                id: traceId,
+                timestamp: startTime,
+                environment: 'production',
+                name: 'Generate outreach email',
+                userId: userInfo?.displayName || null,
+                input: preview(systemPrompt + '\n\n' + userPrompt),
+                output: preview(output),
+                tags: ['specter-outreach', 'openrouter'],
+                metadata: {
+                    pageUrl: null, // Not available in backend context usually, unless passed
+                    domain: companyContext?.website || null
+                },
+                public: false
+            }
+        },
+        {
+            id: randomUUID(),
+            timestamp: startTime,
+            type: 'generation-create',
+            body: {
+                id: observationId,
+                traceId,
+                name: 'openrouter.chat.completions',
+                startTime,
+                endTime,
+                completionStartTime: endTime, // Approximate
+                environment: 'production',
+                model: modelId,
+                modelParameters: { temperature: 0.6 },
+                input: { system: systemPrompt, user: userPrompt },
+                output,
+                usage: usage ? {
+                    promptTokens: usage.prompt_tokens ?? usage.promptTokens ?? null,
+                    completionTokens: usage.completion_tokens ?? usage.completionTokens ?? null,
+                    totalTokens: usage.total_tokens ?? usage.totalTokens ?? null
+                } : null,
+                metadata: {
+                    provider: 'openrouter',
+                    requestId,
+                    latencyMs,
+                    company: companyContext?.companyName || null,
+                    calendlyProvided: !!logData.calendlyLink, // Might need to pass this if important
+                    endpoint: 'chat.completions',
+                    sdk: 'custom-backend'
+                }
+            }
+        }
+    ];
+
+    await langfuseIngest(batch, { source: 'specter-outreach' });
 }

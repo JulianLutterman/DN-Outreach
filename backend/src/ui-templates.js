@@ -582,6 +582,7 @@ export function getWidgetHTML() {
         '                <section class="surface layout-surface">',
         '                    <div class="panel-layout">',
         '                        <div class="panel-main">',
+        '                            <label>Founder Name<input id="founderName" placeholder="Founder Name"/></label>',
         '                            <label>To<input id="to" placeholder="founder-emails@company.com"/></label>',
         '                            <label>Subject<input id="subject" placeholder="Generated subject will appear here..."/></label>',
         '                            <label>Calendly Link<input id="calendly" placeholder="https://calendly.com/your-slot"/></label>',

@@ -83,7 +83,18 @@ export async function generateCompleteEmail(payload, onProgress = () => { }) {
             return result;
         }
 
-        const founderOutput = parallelResult.data || {};
+        let founderOutput = parallelResult.data || {};
+        if (typeof founderOutput === 'string') {
+            try {
+                founderOutput = JSON.parse(founderOutput);
+            } catch (e) {
+                console.warn('[Email Generation] Failed to parse Parallel output:', e);
+                founderOutput = {};
+            }
+        }
+
+        console.log('[Email Generation] Parallel founder output:', JSON.stringify(founderOutput, null, 2));
+
         const founderName = String(founderOutput?.first_last_name || '').trim();
         const linkedinLink = (founderOutput?.linkedin_profile || '').trim();
         const relevantExperience = String(founderOutput?.relevant_experience || '').trim();
@@ -108,6 +119,7 @@ export async function generateCompleteEmail(payload, onProgress = () => { }) {
             if (hunterResult.ok && hunterResult.email) {
                 enrichedEmail = hunterResult.email;
             }
+            console.log('[Email Generation] Hunter result:', JSON.stringify(hunterResult, null, 2));
         }
 
         // Update company context with founder info
@@ -131,6 +143,8 @@ export async function generateCompleteEmail(payload, onProgress = () => { }) {
             domain: domain || '',
             relevantExperience
         };
+
+        console.log('[Email Generation] Final founder contact:', JSON.stringify(result.founderContact, null, 2));
 
         // Step 5: Build system prompt from Notion content
         const { taskDescription, portfolio, exampleEmails } = notionContent;

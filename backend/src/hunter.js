@@ -13,6 +13,8 @@ export async function fetchHunterEmail({ firstName, lastName, domain }) {
         api_key: HUNTER_API_KEY
     });
 
+    console.log('[Hunter] Fetching email for:', { firstName, lastName, domain });
+
     try {
         const res = await fetch(`https://api.hunter.io/v2/email-finder?${qs.toString()}`);
         if (!res.ok) {
@@ -22,6 +24,7 @@ export async function fetchHunterEmail({ firstName, lastName, domain }) {
         const payload = await res.json().catch(() => null);
         const email = payload?.data?.email || payload?.data?.result || null;
         const score = payload?.data?.score ?? payload?.data?.confidence_score ?? null;
+        console.log('[Hunter] API response:', JSON.stringify(payload, null, 2));
         return { ok: true, email, score, raw: payload };
     } catch (err) {
         console.warn('[Specter-Outreach] Hunter email lookup failed:', err);

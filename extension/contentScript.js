@@ -386,7 +386,7 @@
                         appendSignature = true,
                         autoFollowUp = false,
                         followUpTemplate = 'Quick nudge on this. Would love to connect for 30 minutes. Here is my Calendly: {{calendly}}',
-                        modelId = window.__specterDefaultModelId,
+                        modelId = state.specterDefaultModelId,
                         unipileAccountId: storedUnipileAccountId = null,
                         linkedinMessage: storedLinkedinMessage = '',
                         partnerMessage: storedPartnerMessage = '',
@@ -1355,3 +1355,4 @@
     }
 
 })();
+

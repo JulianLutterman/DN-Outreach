@@ -1,6 +1,6 @@
 // backend/src/firecrawl.js
 
-const FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY || 'fc-421d575992e74784ba3112b9b74bf9c3';
+const FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY;
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -105,3 +105,4 @@ export async function crawlWebsite(targetUrl) {
     console.error('[Firecrawl] Job timed out.');
     return { ok: false, error: 'Crawl timed out after 2 minutes', status: 'timeout' };
 }
+

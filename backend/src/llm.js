@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { langfuseIngest } from './langfuse.js';
 import { ensureHttpUrl } from './utils.js';
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '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';
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const DEFAULT_MODEL_ID = 'deepseek/deepseek-v3.1-terminus';
 
 export function makePrompt(companyContext, crawlData, calendly, userInfo) {
@@ -207,4 +207,5 @@ async function logToLangfuse(logData) {
     ];
 
     await langfuseIngest(batch, { source: 'specter-outreach' });
+
 }

@@ -62,8 +62,9 @@ export function getDefaultModelOptions() {
 
 export function getUIConfig() {
     return {
-        defaultModelId: 'deepseek/deepseek-v3.1-terminus',
+        defaultModelId: 'google/gemini-3-pro-preview',
         modelOptions: getDefaultModelOptions(),
         unipilePollIntervalMs: 5000
     };
 }
+

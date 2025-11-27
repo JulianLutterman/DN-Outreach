@@ -14,7 +14,7 @@ export let activeFounderContact = null;
 export let unipileAccountId = null;
 export let unipileAccountDetails = null;
 export let specterLastOverdueProcessMs = 0;
-export let specterDefaultModelId = 'deepseek/deepseek-v3.1-terminus';
+export let specterDefaultModelId = 'google/gemini-3-pro-preview';
 export let specterModelOptions = [];
 export let affinityCompanyIdentifiers = null;
 export let affinityLastDomain = null;
@@ -36,7 +36,7 @@ export function resetState() {
     unipileAccountId = null;
     unipileAccountDetails = null;
     specterLastOverdueProcessMs = 0;
-    specterDefaultModelId = 'deepseek/deepseek-v3.1-terminus';
+    specterDefaultModelId = 'google/gemini-3-pro-preview';
     specterModelOptions = [];
     affinityCompanyIdentifiers = null;
     affinityLastDomain = null;
@@ -77,3 +77,4 @@ export function setPartnerEmailLookup(lookup) {
 export function setSelectedPartnerEmails(emails) {
     selectedPartnerEmails = emails;
 }
+

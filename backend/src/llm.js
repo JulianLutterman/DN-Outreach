@@ -5,7 +5,7 @@ import { langfuseIngest } from './langfuse.js';
 import { ensureHttpUrl } from './utils.js';
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const DEFAULT_MODEL_ID = 'deepseek/deepseek-v3.1-terminus';
+const DEFAULT_MODEL_ID = 'google/gemini-3-pro-preview';
 
 export function makePrompt(companyContext, crawlData, calendly, userInfo) {
     const context = companyContext || {};
@@ -209,3 +209,4 @@ async function logToLangfuse(logData) {
     await langfuseIngest(batch, { source: 'specter-outreach' });
 
 }
+

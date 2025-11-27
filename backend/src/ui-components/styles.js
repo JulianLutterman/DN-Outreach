@@ -177,6 +177,7 @@ export function getStyles() {
         '            flex-direction: column;',
         '            gap: 16px;',
         '            padding-right: 4px;',
+        '            margin-bottom: 10px;',
         '        }',
         '',
         '        .panel-scroll::-webkit-scrollbar {',
@@ -541,3 +542,4 @@ export function getStyles() {
         '    </style>'
     ].join('\n');
 }
+

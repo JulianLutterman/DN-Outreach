@@ -65,12 +65,12 @@
                 if (configResult.ok && configResult.config) {
                     configData = configResult.config;
                     state.setSpecterModelOptions(configData.modelOptions || []);
-                    state.setSpecterDefaultModelId(configData.defaultModelId || 'deepseek/deepseek-v3.1-terminus');
+                    state.setSpecterDefaultModelId(configData.defaultModelId || 'google/gemini-3-pro-preview');
                 }
             } catch (err) {
                 console.warn('[Specter-Outreach] Failed to load config from backend, using defaults:', err);
                 state.setSpecterModelOptions([]);
-                state.setSpecterDefaultModelId('deepseek/deepseek-v3.1-terminus');
+                state.setSpecterDefaultModelId('google/gemini-3-pro-preview');
             }
 
             const getSpecterModelLabelById = (id) => {
@@ -1355,4 +1355,5 @@
     }
 
 })();
+
 

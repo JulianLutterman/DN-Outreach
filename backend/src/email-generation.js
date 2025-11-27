@@ -23,7 +23,7 @@ export async function generateCompleteEmail(payload, onProgress = () => { }) {
         companyContext,
         calendlyLink = '',
         userInfo = {},
-        modelId = 'deepseek/deepseek-v3.1-terminus'
+        modelId = 'google/gemini-3-pro-preview'
     } = payload;
 
     const result = {
@@ -224,3 +224,4 @@ export async function generateCompleteEmail(payload, onProgress = () => { }) {
         return result;
     }
 }
+

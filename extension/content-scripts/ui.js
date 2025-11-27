@@ -1,6 +1,7 @@
 // content-scripts/ui.js
 
 import { escapeRegExp } from './utils.js';
+import { activeFounderContact, companyContext, userInfo } from './state.js';
 
 // widgetHTML is now fetched from backend via /api/ui/widget-html
 
@@ -182,8 +183,8 @@ export function rememberTemplateBaseline(el, initialCandidate = '') {
 }
 
 export function autoFillFollowUpMessages(widgetQuery) {
-    const firstName = (window.__activeFounderContact?.firstName
-        || window.__companyContext?.founder?.firstName
+    const firstName = (activeFounderContact?.firstName
+        || companyContext?.founder?.firstName
         || '').trim();
     const calendly = widgetQuery('#calendly')?.value?.trim() || '';
     const partnerSelect = widgetQuery('#partnerForwardSelect');
@@ -278,7 +279,7 @@ export function updateUnipileButtonState(accountId, widgetQuery, setLinkedInFoll
     const btn = widgetQuery('#unipileBtn');
     if (!btn) return;
     const row = btn.closest('.unipile-row');
-    const isLoggedIn = !!window.__userInfo;
+    const isLoggedIn = !!userInfo;
     console.log('[Unipile][ui] update button state', { accountId, isLoggedIn });
 
     if (!isLoggedIn) {

@@ -2,6 +2,10 @@
 
 import { sendMessageWithTimeout } from './utils.js';
 import { updateLoginUI, setStatus, showLoginButton, updateUnipileButtonState } from './ui.js';
+import {
+    setMsToken, setUserInfo, setSpecterLastOverdueProcessMs, setUnipileAccountId,
+    unipileAccountId, userInfo, msToken
+} from './state.js';
 
 export async function loginOutlook(fetchAndStoreUserProfile, widgetQuery) {
     setStatus('Authenticating with Microsoft...', widgetQuery);
@@ -20,11 +24,11 @@ export async function logoutOutlook(stopUnipilePolling, widgetQuery, setLinkedIn
     try {
         await chrome.storage.local.remove(['msToken', 'userInfo']);
 
-        window.__msToken = null;
-        window.__userInfo = null;
-        window.__specterLastOverdueProcessMs = 0;
+        setMsToken(null);
+        setUserInfo(null);
+        setSpecterLastOverdueProcessMs(0);
         stopUnipilePolling();
-        window.__unipileAccountId = null;
+        setUnipileAccountId(null);
         updateUnipileButtonState(null, widgetQuery, setLinkedInFollowUpAvailability);
         chrome.storage.sync.remove('unipileAccountId', () => { });
 
@@ -47,30 +51,30 @@ export async function fetchAndStoreUserProfile(token, triggerOverdueTaskProcessi
 
         const profile = await res.json();
 
-        const userInfo = {
+        const newUserInfo = {
             firstName: profile.givenName,
             lastName: profile.surname,
             displayName: profile.displayName || profile.userPrincipalName,
             email: (profile.mail || profile.userPrincipalName || '').toLowerCase()
         };
 
-        await chrome.storage.local.set({ msToken: token, userInfo });
+        await chrome.storage.local.set({ msToken: token, userInfo: newUserInfo });
 
-        window.__msToken = token;
-        window.__userInfo = userInfo;
+        setMsToken(token);
+        setUserInfo(newUserInfo);
 
-        updateLoginUI(userInfo.displayName, widgetQuery);
+        updateLoginUI(newUserInfo.displayName, widgetQuery);
         setStatus('Outlook connected.', widgetQuery);
 
-        if (window.__unipileAccountId && userInfo.email) {
+        if (unipileAccountId && newUserInfo.email) {
             sendMessageWithTimeout('UPSERT_USER_UNIPILE_ID', {
-                email: userInfo.email,
-                unipileId: window.__unipileAccountId,
+                email: newUserInfo.email,
+                unipileId: unipileAccountId,
                 userInfo: {
-                    email: userInfo.email,
-                    displayName: userInfo.displayName || userInfo.userPrincipalName || '',
-                    firstName: userInfo.firstName || userInfo.givenName || '',
-                    lastName: userInfo.lastName || userInfo.surname || ''
+                    email: newUserInfo.email,
+                    displayName: newUserInfo.displayName || newUserInfo.userPrincipalName || '',
+                    firstName: newUserInfo.firstName || newUserInfo.givenName || '',
+                    lastName: newUserInfo.lastName || newUserInfo.surname || ''
                 }
             }, 15000)
                 .then(res => {
@@ -100,18 +104,18 @@ export async function fetchAndStoreUserProfile(token, triggerOverdueTaskProcessi
 
 export async function checkStoredLogin(fetchAndStoreUserProfile, triggerOverdueTaskProcessing, syncUnipileStatus, widgetQuery) {
     try {
-        const { msToken, userInfo } = await chrome.storage.local.get(['msToken', 'userInfo']);
+        const { msToken: storedToken, userInfo: storedUserInfo } = await chrome.storage.local.get(['msToken', 'userInfo']);
 
-        if (msToken && userInfo && userInfo.displayName) {
+        if (storedToken && storedUserInfo && storedUserInfo.displayName) {
             const res = await fetch('https://graph.microsoft.com/v1.0/me', {
-                headers: { 'Authorization': 'Bearer ' + msToken }
+                headers: { 'Authorization': 'Bearer ' + storedToken }
             });
 
             if (res.ok) {
                 console.log('[Specter-Outreach] Stored token is valid.');
-                window.__msToken = msToken;
-                window.__userInfo = userInfo;
-                updateLoginUI(userInfo.displayName, widgetQuery);
+                setMsToken(storedToken);
+                setUserInfo(storedUserInfo);
+                updateLoginUI(storedUserInfo.displayName, widgetQuery);
                 setStatus('Outlook connected.', widgetQuery);
                 syncUnipileStatus({ silent: true });
                 await triggerOverdueTaskProcessing('extension-open');

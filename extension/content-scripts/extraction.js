@@ -1,10 +1,11 @@
 // content-scripts/extraction.js
 
 import { ensureHttpUrl, extractDomainFromUrl } from './utils.js';
+import { companyContext, setCompanyContext } from './state.js';
 
 // crawlWebsite() has been moved to backend - use chrome.runtime.sendMessage with type 'CRAWL_WEBSITE'
 
-export function gatherCompanyContextFromPage(existing = window.__companyContext || {}) {
+export function gatherCompanyContextFromPage(existing = companyContext || {}) {
     const previousContext = existing || {};
     const currentHref = typeof location?.href === 'string' ? location.href : '';
     const currentHostname = typeof location?.hostname === 'string' ? location.hostname : '';
@@ -149,7 +150,7 @@ export function gatherCompanyContextFromPage(existing = window.__companyContext 
 }
 
 export function updateCompanyContextFromPage() {
-    const context = gatherCompanyContextFromPage(window.__companyContext || {});
-    window.__companyContext = context;
+    const context = gatherCompanyContextFromPage(companyContext || {});
+    setCompanyContext(context);
     return context;
 }

@@ -17,36 +17,6 @@
     } else {
         window.__specterContentScriptInjected = true;
 
-        /* global chrome, window, document, fetch, history, location */
-
-        // ---------- Initialization & Re-injection Protection ----------
-
-        window.__specterSleep = window.__specterSleep || ((ms) => new Promise(r => setTimeout(r, ms)));
-        window.__affinityCompanyIdentifiers = window.__affinityCompanyIdentifiers || null;
-
-        window.__affinityLastDomain = window.__affinityLastDomain || null;
-        window.__affinityDidInitialCheck = window.__affinityDidInitialCheck || false;
-
-        window.__unipileAccountId = window.__unipileAccountId || null;
-        window.__unipilePollTimerId = window.__unipilePollTimerId || null;
-        window.__unipilePollNoticeTimeoutId = window.__unipilePollNoticeTimeoutId || null;
-
-        window.__specterDefaultModelId = window.__specterDefaultModelId || 'deepseek/deepseek-v3.1-terminus';
-
-        // Models are now loaded dynamically from config.js, but we keep a default here or load them.
-        // We'll load modules shortly.
-
-        window.__specterGetModelLabelById = window.__specterGetModelLabelById || function (id) {
-            // This will be updated once config is loaded
-            const m = (window.__specterModelOptions || []).find(x => x.id === id);
-            return m ? m.label : id;
-        };
-
-        window.__activeFounderContact = window.__activeFounderContact || null;
-        window.__companyContext = window.__companyContext || null;
-
-        let workflowUtilsModulePromise = null;
-
         // Dynamic imports
         const loadModules = async () => {
             const [
@@ -94,17 +64,17 @@
                 const configResult = await configRes.json();
                 if (configResult.ok && configResult.config) {
                     configData = configResult.config;
-                    window.__specterModelOptions = configData.modelOptions || [];
-                    window.__specterDefaultModelId = configData.defaultModelId || 'deepseek/deepseek-v3.1-terminus';
+                    state.setSpecterModelOptions(configData.modelOptions || []);
+                    state.setSpecterDefaultModelId(configData.defaultModelId || 'deepseek/deepseek-v3.1-terminus');
                 }
             } catch (err) {
                 console.warn('[Specter-Outreach] Failed to load config from backend, using defaults:', err);
-                window.__specterModelOptions = [];
-                window.__specterDefaultModelId = 'deepseek/deepseek-v3.1-terminus';
+                state.setSpecterModelOptions([]);
+                state.setSpecterDefaultModelId('deepseek/deepseek-v3.1-terminus');
             }
 
-            window.__specterGetModelLabelById = function (id) {
-                const m = (window.__specterModelOptions || []).find(x => x.id === id);
+            const getSpecterModelLabelById = (id) => {
+                const m = (state.specterModelOptions || []).find(x => x.id === id);
                 return m ? m.label : id;
             };
 
@@ -118,24 +88,23 @@
             const $ = widgetQuery;
 
             // State variables from modules/state
-
-            window.__specterLastOverdueProcessMs = window.__specterLastOverdueProcessMs || 0;
+            // window.__specterLastOverdueProcessMs = window.__specterLastOverdueProcessMs || 0; // Removed, using state.specterLastOverdueProcessMs
 
             async function triggerOverdueTaskProcessing(reason = 'unspecified') {
-                if (!window.__userInfo || !window.__userInfo.email) return;
+                if (!state.userInfo || !state.userInfo.email) return;
 
                 const now = Date.now();
-                if (now - window.__specterLastOverdueProcessMs < 15_000 && reason !== 'login') {
+                if (now - state.specterLastOverdueProcessMs < 15_000 && reason !== 'login') {
                     return;
                 }
 
                 try {
                     const res = await utils.sendMessageWithTimeout('PROCESS_OVERDUE_TASKS', {
-                        user: window.__userInfo,
+                        user: state.userInfo,
                         reason
                     }, 20000);
                     if (res?.ok) {
-                        window.__specterLastOverdueProcessMs = now;
+                        state.setSpecterLastOverdueProcessMs(now);
                     } else if (res) {
                         console.warn('[Specter-Outreach] Overdue task processing failed:', res);
                     }
@@ -145,14 +114,14 @@
             }
 
             function stopUnipilePolling() {
-                if (window.__unipilePollTimerId) {
-                    clearTimeout(window.__unipilePollTimerId);
-                    window.__unipilePollTimerId = null;
+                if (state.unipilePollTimerId) {
+                    clearTimeout(state.unipilePollTimerId);
+                    state.setUnipilePollTimerId(null);
                     console.log('[Unipile][poll] cleared tick timer');
                 }
-                if (window.__unipilePollNoticeTimeoutId) {
-                    clearTimeout(window.__unipilePollNoticeTimeoutId);
-                    window.__unipilePollNoticeTimeoutId = null;
+                if (state.unipilePollNoticeTimeoutId) {
+                    clearTimeout(state.unipilePollNoticeTimeoutId);
+                    state.setUnipilePollNoticeTimeoutId(null);
                     console.log('[Unipile][poll] cleared notice timer');
                 }
             }
@@ -162,14 +131,14 @@
                 stopUnipilePolling();
 
                 if (showNotice) {
-                    if (window.__unipilePollNoticeTimeoutId) {
-                        clearTimeout(window.__unipilePollNoticeTimeoutId);
+                    if (state.unipilePollNoticeTimeoutId) {
+                        clearTimeout(state.unipilePollNoticeTimeoutId);
                     }
-                    window.__unipilePollNoticeTimeoutId = setTimeout(() => {
-                        if (!window.__unipileAccountId) {
+                    state.setUnipilePollNoticeTimeoutId(setTimeout(() => {
+                        if (!state.unipileAccountId) {
                             ui.setStatus('Still waiting for Unipile to finish LinkedIn connection...', widgetQuery);
                         }
-                    }, UNIPILE_POLL_INTERVAL_MS * 12);
+                    }, UNIPILE_POLL_INTERVAL_MS * 12));
                 }
 
                 async function tick(previousKnown = knownAccountIds) {
@@ -185,10 +154,10 @@
                             return;
                         }
 
-                        window.__unipilePollTimerId = setTimeout(() => tick(nextKnown), UNIPILE_POLL_INTERVAL_MS);
+                        state.setUnipilePollTimerId(setTimeout(() => tick(nextKnown), UNIPILE_POLL_INTERVAL_MS));
                     } catch (err) {
                         console.warn('[Specter-Outreach] Unipile polling error:', err);
-                        window.__unipilePollTimerId = setTimeout(() => tick(previousKnown), UNIPILE_POLL_INTERVAL_MS);
+                        state.setUnipilePollTimerId(setTimeout(() => tick(previousKnown), UNIPILE_POLL_INTERVAL_MS));
                     }
                 }
 
@@ -198,12 +167,12 @@
             async function persistUnipileAccount(accountId, { silent = false, account = null } = {}) {
                 if (!accountId) return;
 
-                const isSameAccount = window.__unipileAccountId === accountId;
+                const isSameAccount = state.unipileAccountId === accountId;
                 console.log('[Unipile][persist] storing account', accountId, { silent, isSameAccount, hasAccountDetails: !!account });
                 stopUnipilePolling();
-                window.__unipileAccountId = accountId;
+                state.setUnipileAccountId(accountId);
                 if (account) {
-                    window.__unipileAccountDetails = account;
+                    state.setUnipileAccountDetails(account);
                 }
                 ui.updateUnipileButtonState(accountId, widgetQuery, (connected) => ui.setLinkedInFollowUpAvailability(connected, widgetQuery));
 
@@ -224,16 +193,16 @@
                     }
                 }
 
-                const email = (window.__userInfo?.email || '').toLowerCase();
-                const accountDetails = account || window.__unipileAccountDetails || null;
+                const email = (state.userInfo?.email || '').toLowerCase();
+                const accountDetails = account || state.unipileAccountDetails || null;
                 const derivedLinkedIn = utils.deriveLinkedInFromAccount(accountDetails);
 
                 if (email) {
                     const userInfoPayload = {
                         email,
-                        displayName: window.__userInfo?.displayName || window.__userInfo?.userPrincipalName || '',
-                        firstName: window.__userInfo?.firstName || window.__userInfo?.givenName || '',
-                        lastName: window.__userInfo?.lastName || window.__userInfo?.surname || ''
+                        displayName: state.userInfo?.displayName || state.userInfo?.userPrincipalName || '',
+                        firstName: state.userInfo?.firstName || state.userInfo?.givenName || '',
+                        lastName: state.userInfo?.lastName || state.userInfo?.surname || ''
                     };
 
                     if (derivedLinkedIn) {
@@ -262,56 +231,56 @@
             }
 
             async function syncUnipileStatus({ silent = false } = {}) {
-                console.log('[Unipile][sync] invoked', { silent, user: window.__userInfo });
-                if (!window.__userInfo || !window.__userInfo.email) {
+                console.log('[Unipile][sync] invoked', { silent, user: state.userInfo });
+                if (!state.userInfo || !state.userInfo.email) {
                     if (!silent) ui.setStatus('Please connect Outlook before syncing Unipile.', widgetQuery);
                     return;
                 }
 
                 try {
-                    const res = await utils.sendMessageWithTimeout('SYNC_UNIPILE_STATUS', { user: window.__userInfo }, 15000);
+                    const res = await utils.sendMessageWithTimeout('SYNC_UNIPILE_STATUS', { user: state.userInfo }, 15000);
                     console.log('[Unipile][sync] response', res);
                     if (res?.ok && res.accountId) {
-                        if (window.__unipileAccountId !== res.accountId || res.account) {
+                        if (state.unipileAccountId !== res.accountId || res.account) {
                             await persistUnipileAccount(res.accountId, { silent, account: res.account || null });
                         } else {
-                            ui.updateUnipileButtonState(window.__unipileAccountId, widgetQuery, (connected) => ui.setLinkedInFollowUpAvailability(connected, widgetQuery));
+                            ui.updateUnipileButtonState(state.unipileAccountId, widgetQuery, (connected) => ui.setLinkedInFollowUpAvailability(connected, widgetQuery));
                         }
                         stopUnipilePolling();
                     } else {
-                        if (res?.ok && !res.accountId && window.__unipileAccountId) {
+                        if (res?.ok && !res.accountId && state.unipileAccountId) {
                             try {
                                 await new Promise(resolve => chrome.storage.sync.remove('unipileAccountId', () => resolve()));
                             } catch (err) {
                                 console.warn('[Specter-Outreach] Failed to clear stored Unipile id:', err);
                             }
-                            window.__unipileAccountId = null;
-                            window.__unipileAccountDetails = null;
+                            state.setUnipileAccountId(null);
+                            state.setUnipileAccountDetails(null);
                         }
-                        if (Array.isArray(res?.knownAccountIds) && res.knownAccountIds.length && window.__userInfo) {
-                            beginUnipilePolling({ knownAccountIds: res.knownAccountIds, userProfile: window.__userInfo, showNotice: !silent });
-                        } else if (!window.__unipileAccountId) {
+                        if (Array.isArray(res?.knownAccountIds) && res.knownAccountIds.length && state.userInfo) {
+                            beginUnipilePolling({ knownAccountIds: res.knownAccountIds, userProfile: state.userInfo, showNotice: !silent });
+                        } else if (!state.unipileAccountId) {
                             stopUnipilePolling();
                         }
-                        ui.updateUnipileButtonState(window.__unipileAccountId || null, widgetQuery, (connected) => ui.setLinkedInFollowUpAvailability(connected, widgetQuery));
+                        ui.updateUnipileButtonState(state.unipileAccountId || null, widgetQuery, (connected) => ui.setLinkedInFollowUpAvailability(connected, widgetQuery));
                     }
                 } catch (err) {
                     console.warn('[Specter-Outreach] Unipile status sync failed:', err);
-                    ui.updateUnipileButtonState(window.__unipileAccountId || null, widgetQuery, (connected) => ui.setLinkedInFollowUpAvailability(connected, widgetQuery));
+                    ui.updateUnipileButtonState(state.unipileAccountId || null, widgetQuery, (connected) => ui.setLinkedInFollowUpAvailability(connected, widgetQuery));
                 }
             }
 
             async function startUnipileLinkedInLogin() {
-                if (!window.__userInfo) {
+                if (!state.userInfo) {
                     ui.setStatus('Connect Outlook before linking LinkedIn.', widgetQuery);
                     return;
                 }
 
-                console.log('[Unipile][ui] start login', { hasAccount: !!window.__unipileAccountId, user: window.__userInfo });
-                if (window.__unipileAccountId) {
+                console.log('[Unipile][ui] start login', { hasAccount: !!state.unipileAccountId, user: state.userInfo });
+                if (state.unipileAccountId) {
                     stopUnipilePolling();
                     ui.setStatus('LinkedIn already connected via Unipile.', widgetQuery);
-                    ui.updateUnipileButtonState(window.__unipileAccountId, widgetQuery, (connected) => ui.setLinkedInFollowUpAvailability(connected, widgetQuery));
+                    ui.updateUnipileButtonState(state.unipileAccountId, widgetQuery, (connected) => ui.setLinkedInFollowUpAvailability(connected, widgetQuery));
                     return;
                 }
 
@@ -321,7 +290,7 @@
 
                 try {
                     ui.setStatus('Requesting LinkedIn login link from Unipile...', widgetQuery);
-                    const res = await utils.sendMessageWithTimeout('GENERATE_UNIPILE_LINKEDIN_LOGIN', { user: window.__userInfo || {} }, 15000);
+                    const res = await utils.sendMessageWithTimeout('GENERATE_UNIPILE_LINKEDIN_LOGIN', { user: state.userInfo || {} }, 15000);
                     console.log('[Unipile][ui] generate result', res);
 
                     const knownIds = Array.isArray(res?.knownAccountIds) ? res.knownAccountIds : [];
@@ -340,12 +309,12 @@
                     window.open(res.url, '_blank', 'noopener,noreferrer');
                     ui.setStatus('LinkedIn login opened in a new tab via Unipile. Complete it there and leave this tab open.', widgetQuery);
 
-                    beginUnipilePolling({ knownAccountIds: knownIds, userProfile: window.__userInfo || {} });
+                    beginUnipilePolling({ knownAccountIds: knownIds, userProfile: state.userInfo || {} });
                 } catch (err) {
                     ui.setStatus('Unipile login failed: ' + (err?.message || err), widgetQuery);
                 } finally {
-                    if (btn) btn.disabled = !!window.__unipileAccountId;
-                    ui.updateUnipileButtonState(window.__unipileAccountId || null, widgetQuery, (connected) => ui.setLinkedInFollowUpAvailability(connected, widgetQuery));
+                    if (btn) btn.disabled = !!state.unipileAccountId;
+                    ui.updateUnipileButtonState(state.unipileAccountId || null, widgetQuery, (connected) => ui.setLinkedInFollowUpAvailability(connected, widgetQuery));
                 }
             }
 
@@ -390,13 +359,13 @@
                 ui.makeResizable(shadowRoot.querySelector('#specter-outreach-panel'));
                 ui.makeDraggableWithinWindow(root, shadowRoot);
 
-                ui.setLinkedInFollowUpAvailability(!!window.__unipileAccountId, widgetQuery);
-                ui.updateUnipileButtonState(window.__unipileAccountId || null, widgetQuery, (connected) => ui.setLinkedInFollowUpAvailability(connected, widgetQuery));
-                if (window.__userInfo) syncUnipileStatus({ silent: true });
+                ui.setLinkedInFollowUpAvailability(!!state.unipileAccountId, widgetQuery);
+                ui.updateUnipileButtonState(state.unipileAccountId || null, widgetQuery, (connected) => ui.setLinkedInFollowUpAvailability(connected, widgetQuery));
+                if (state.userInfo) syncUnipileStatus({ silent: true });
 
                 const modelSelect = widgetQuery('#modelSelect');
-                if (modelSelect && window.__specterModelOptions?.length) {
-                    modelSelect.innerHTML = (window.__specterModelOptions || [])
+                if (modelSelect && state.specterModelOptions?.length) {
+                    modelSelect.innerHTML = (state.specterModelOptions || [])
                         .map(o => '<option value="' + o.id + '">' + o.label + '</option>')
                         .join('');
                 }
@@ -436,9 +405,9 @@
                     $id('linkedin').value = storedLinkedinUrl || '';
                     $id('cc').value = ccList;
                     if (storedUnipileAccountId) {
-                        window.__unipileAccountId = storedUnipileAccountId;
+                        state.setUnipileAccountId(storedUnipileAccountId);
                     }
-                    ui.updateUnipileButtonState(window.__unipileAccountId || null, widgetQuery, (connected) => ui.setLinkedInFollowUpAvailability(connected, widgetQuery));
+                    ui.updateUnipileButtonState(state.unipileAccountId || null, widgetQuery, (connected) => ui.setLinkedInFollowUpAvailability(connected, widgetQuery));
                     $id('signatureHtml').value = signatureHtml;
                     $id('appendSignature').checked = !!appendSignature;
                     $id('autoFollowUp').checked = !!autoFollowUp;
@@ -459,7 +428,7 @@
                     workflow.initializeWorkflowDefaults(widgetQuery);
                 } catch (err) {
                     console.warn('[Specter-Outreach] Could not access chrome.storage:', err);
-                    ui.updateUnipileButtonState(window.__unipileAccountId || null, widgetQuery, (connected) => ui.setLinkedInFollowUpAvailability(connected, widgetQuery));
+                    ui.updateUnipileButtonState(state.unipileAccountId || null, widgetQuery, (connected) => ui.setLinkedInFollowUpAvailability(connected, widgetQuery));
                 }
 
                 shadowRoot.addEventListener('blur', e => {
@@ -479,7 +448,7 @@
                             appendSignature: widgetQuery('#appendSignature').checked,
                             autoFollowUp: widgetQuery('#autoFollowUp').checked,
                             followUpTemplate: widgetQuery('#followUpTemplate').value,
-                            modelId: (widgetQuery('#modelSelect')?.value || window.__specterDefaultModelId),
+                            modelId: (widgetQuery('#modelSelect')?.value || state.specterDefaultModelId),
                             linkedinMessage: widgetQuery('#linkedinMessage')?.value || '',
                             partnerMessage: widgetQuery('#partnerMessage')?.value || '',
                             followUpTrigger: widgetQuery('#followUpTrigger')?.value || '',
@@ -562,12 +531,12 @@
                 try {
                     const context = extraction.updateCompanyContextFromPage();
                     const identifiers = deriveAffinityIdentifiers(context || null);
-                    const domainChanged = identifiers.domain && identifiers.domain !== window.__affinityLastDomain;
+                    const domainChanged = identifiers.domain && identifiers.domain !== state.affinityLastDomain;
 
-                    if (!window.__affinityDidInitialCheck || domainChanged) {
+                    if (!state.affinityDidInitialCheck || domainChanged) {
                         await refreshAffinityDealPipeline(context || null, { force: true });
-                        window.__affinityLastDomain = identifiers.domain || null;
-                        window.__affinityDidInitialCheck = true;
+                        state.setAffinityLastDomain(identifiers.domain || null);
+                        state.setAffinityDidInitialCheck(true);
                     } else {
                         await refreshAffinityDealPipeline(context || null);
                     }
@@ -627,13 +596,13 @@
 
             async function refreshWorkflowSnapshot({ $, workflowUtils }) {
                 try {
-                    const context = window.__companyContext || extraction.updateCompanyContextFromPage();
+                    const context = state.companyContext || extraction.updateCompanyContextFromPage();
                     const domain = context?.domain || utils.extractDomainFromUrl(context?.website || '') || (location.hostname || '');
                     const companyName = context?.companyName || '';
                     const response = await utils.sendMessageWithTimeout('FETCH_WORKFLOW_SNAPSHOT', {
                         domain,
                         companyName,
-                        user: window.__userInfo || {}
+                        user: state.userInfo || {}
                     }, 15000);
                     if (response?.ok) {
                         state.setWorkflowSnapshot(response.data || state.workflowSnapshot);
@@ -739,12 +708,12 @@
                     indicator.className = 'affinity-indicator';
                     button.style.display = 'none';
                     button.disabled = true;
-                    window.__affinityCompanyIdentifiers = null;
+                    state.setAffinityCompanyIdentifiers(null);
                     return;
                 }
 
                 const identifiers = deriveAffinityIdentifiers(company);
-                window.__affinityCompanyIdentifiers = identifiers;
+                state.setAffinityCompanyIdentifiers(identifiers);
 
                 if (!identifiers.domain && !identifiers.name) {
                     indicator.textContent = 'Missing company info for Affinity lookup.';
@@ -787,12 +756,13 @@
                 }
             }
 
+
             async function addCompanyToDealPipeline() {
                 const indicator = widgetQuery('#affinityDealIndicator');
                 const button = widgetQuery('#addDealPipelineBtn');
                 if (!indicator || !button) return;
 
-                const identifiers = window.__affinityCompanyIdentifiers;
+                const identifiers = state.affinityCompanyIdentifiers;
                 if (!identifiers || (!identifiers.domain && !identifiers.name)) {
                     ui.setStatus('Cannot add to Affinity: missing company information.', widgetQuery);
                     return;
@@ -813,7 +783,7 @@
                     }
 
                     ui.setStatus('Company added to Affinity Deal Pipeline.', widgetQuery);
-                    await refreshAffinityDealPipeline(window.__companyContext || null, { force: true });
+                    await refreshAffinityDealPipeline(state.companyContext || null, { force: true });
                 } catch (error) {
                     console.error('[Specter-Outreach] Failed to add company to Deal Pipeline:', error);
                     indicator.textContent = 'Add to Deal Pipeline failed';
@@ -830,17 +800,17 @@
                     return;
                 }
 
-                window.__companyContext = context;
-                window.__activeFounderContact = null;
+                state.setCompanyContext(context);
+                state.setActiveFounderContact(null);
 
                 await triggerOverdueTaskProcessing('generate-email');
 
-                const modelId = (widgetQuery('#modelSelect')?.value) || window.__specterDefaultModelId;
-                const modelLabel = window.__specterGetModelLabelById(modelId);
+                const modelId = (widgetQuery('#modelSelect')?.value) || state.specterDefaultModelId;
+                const modelLabel = getSpecterModelLabelById(modelId);
                 const calendly = widgetQuery('#calendly').value.trim();
                 // Ensure userInfo is available
-                let userInfo = window.__userInfo;
-                console.log('[Specter-Outreach] Current window.__userInfo:', userInfo);
+                let userInfo = state.userInfo;
+                console.log('[Specter-Outreach] Current state.userInfo:', userInfo);
 
                 if (!userInfo || !userInfo.displayName || !userInfo.displayName.trim()) {
                     console.log('[Specter-Outreach] userInfo missing or incomplete, checking storage...');
@@ -849,7 +819,7 @@
 
                     if (stored.userInfo && stored.userInfo.displayName) {
                         userInfo = stored.userInfo;
-                        window.__userInfo = userInfo;
+                        state.setUserInfo(userInfo);
                         console.log('[Specter-Outreach] Restored userInfo from storage:', userInfo);
                     } else {
                         // Attempt one last fetch if we have a token
@@ -868,7 +838,7 @@
                                         displayName: profile.displayName || profile.userPrincipalName,
                                         email: (profile.mail || profile.userPrincipalName || '').toLowerCase()
                                     };
-                                    window.__userInfo = userInfo;
+                                    state.setUserInfo(userInfo);
                                     await chrome.storage.local.set({ userInfo });
                                     console.log('[Specter-Outreach] Fetched fresh profile:', userInfo);
                                 }
@@ -887,7 +857,7 @@
                         if (name) {
                             console.log('[Specter-Outreach] Recovered user name from UI:', name);
                             userInfo = { displayName: name };
-                            window.__userInfo = userInfo;
+                            state.setUserInfo(userInfo);
                         }
                     }
                 }
@@ -990,9 +960,9 @@
                     // Handle founder contact info
                     if (result.founderContact) {
                         const founder = result.founderContact;
-                        const domainForContact = window.__companyContext?.domain || '';
+                        const domainForContact = state.companyContext?.domain || '';
 
-                        window.__activeFounderContact = {
+                        state.setActiveFounderContact({
                             fullName: founder.fullName,
                             firstName: founder.firstName,
                             lastName: founder.lastName,
@@ -1000,7 +970,7 @@
                             linkedin: founder.linkedin || '',
                             domain: domainForContact || '',
                             relevantExperience: founder.relevantExperience || ''
-                        };
+                        });
 
                         // Update UI fields if they exist
                         const fName = widgetQuery('#founderName');
@@ -1028,7 +998,7 @@
             }
 
             async function sendEmail() {
-                if (!window.__companyContext) {
+                if (!state.companyContext) {
                     return ui.setStatus('No company data loaded. Please generate email first.', widgetQuery);
                 }
 
@@ -1106,17 +1076,17 @@
 
                 await triggerOverdueTaskProcessing('email-send');
 
-                if (window.__activeFounderContact) {
-                    window.__activeFounderContact.email = toList[0] || window.__activeFounderContact.email || '';
+                if (state.activeFounderContact) {
+                    state.activeFounderContact.email = toList[0] || state.activeFounderContact.email || '';
                 }
 
-                const founderLinkedInRaw = widgetQuery('#linkedin')?.value?.trim() || window.__activeFounderContact?.linkedin || '';
+                const founderLinkedInRaw = widgetQuery('#linkedin')?.value?.trim() || state.activeFounderContact?.linkedin || '';
                 const founderLinkedIn = founderLinkedInRaw ? utils.ensureHttpUrl(founderLinkedInRaw) : '';
-                const contactName = (window.__activeFounderContact?.fullName
-                    || window.__activeFounderContact?.name
-                    || window.__companyContext?.founder?.fullName
+                const contactName = (state.activeFounderContact?.fullName
+                    || state.activeFounderContact?.name
+                    || state.companyContext?.founder?.fullName
                     || '').trim();
-                const companyName = (window.__companyContext?.companyName || '').trim();
+                const companyName = (state.companyContext?.companyName || '').trim();
                 const primaryEmail = toList[0] || '';
 
                 const subject = widgetQuery('#subject').value;
@@ -1135,7 +1105,7 @@
                     const createDraftRes = await fetch('https://graph.microsoft.com/v1.0/me/messages', {
                         method: 'POST',
                         headers: {
-                            'Authorization': 'Bearer ' + window.__msToken,
+                            'Authorization': 'Bearer ' + state.msToken,
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
@@ -1156,7 +1126,7 @@
 
                     const sendRes = await fetch('https://graph.microsoft.com/v1.0/me/messages/' + draft.id + '/send', {
                         method: 'POST',
-                        headers: { 'Authorization': 'Bearer ' + window.__msToken }
+                        headers: { 'Authorization': 'Bearer ' + state.msToken }
                     });
 
                     if (!sendRes.ok) {
@@ -1210,7 +1180,7 @@
 
                     for (let i = 0; i < 10; i++) {
                         try {
-                            anchor = await findSentAnchorOnce({ subject, toList, msToken: window.__msToken });
+                            anchor = await findSentAnchorOnce({ subject, toList, msToken: state.msToken });
                             if (anchor) break;
                         } catch (e) {
                             console.warn('[Specter-Outreach] Anchor lookup error (attempt ' + (i + 1) + '):', e);
@@ -1232,9 +1202,9 @@
                 const partnerForwardOption = partnerForwardSelect?.selectedOptions?.[0] || null;
                 const partnerForwardEmail = partnerForwardOption?.dataset?.email || '';
                 const partnerForwardName = partnerForwardOption && partnerForwardOption.value ? String(partnerForwardOption.textContent || '').trim() : '';
-                const contactFirstName = window.__activeFounderContact?.firstName
-                    || window.__activeFounderContact?.givenName
-                    || window.__activeFounderContact?.name
+                const contactFirstName = state.activeFounderContact?.firstName
+                    || state.activeFounderContact?.givenName
+                    || state.activeFounderContact?.name
                     || (contactName ? contactName.split(/\s+/)[0] : '');
                 const nowIso = new Date().toISOString();
 
@@ -1305,16 +1275,16 @@
 
             async function syncCompanyToSupabase({ toList = [], steps = [], fallbackPartnerId = null } = {}) {
                 try {
-                    const companyContext = window.__companyContext || {};
+                    const companyContext = state.companyContext || {};
                     const companyName = (companyContext?.companyName || '').trim();
                     const websiteCandidate = companyContext?.website || '';
                     const linkedinField = widgetQuery('#linkedin')?.value?.trim() || '';
-                    const linkedInFinal = linkedinField || window.__activeFounderContact?.linkedin || '';
-                    const contactName = (window.__activeFounderContact?.fullName
-                        || window.__activeFounderContact?.name
+                    const linkedInFinal = linkedinField || state.activeFounderContact?.linkedin || '';
+                    const contactName = (state.activeFounderContact?.fullName
+                        || state.activeFounderContact?.name
                         || companyContext?.founder?.fullName
                         || '').trim();
-                    const primaryEmail = (toList[0] || window.__activeFounderContact?.email || '').trim();
+                    const primaryEmail = (toList[0] || state.activeFounderContact?.email || '').trim();
 
                     if (!companyName || !contactName || !primaryEmail) {
                         console.warn('[Specter-Outreach] Skipping Supabase insert - missing fields.', { companyName, contactName, primaryEmail });
@@ -1340,7 +1310,7 @@
                     let taskResult = { ok: true, data: [] };
 
                     if (Array.isArray(steps) && steps.length) {
-                        const userInfo = window.__userInfo || {};
+                        const userInfo = state.userInfo || {};
                         const normalizedUserEmail = (userInfo.email || userInfo.mail || userInfo.userPrincipalName || '').toLowerCase();
                         if (!normalizedUserEmail) {
                             console.warn('[Specter-Outreach] Cannot sync workflow tasks without a user email.');

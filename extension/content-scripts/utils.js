@@ -63,3 +63,100 @@ export function dedupeEmails(emails = []) {
     }
     return result;
 }
+
+export function buildHtmlBody(plainText, signatureHtml, shouldAppend) {
+    let html = String(plainText || '').replace(/\n/g, '<br/>');
+    if (shouldAppend && signatureHtml && signatureHtml.trim()) {
+        const sep = html.endsWith('<br/>') ? '' : '<br/><br/>';
+        html = html + sep + signatureHtml.trim();
+    }
+    return html;
+}
+
+export function normalizeSubjectBase(subj = '') {
+    return String(subj).replace(/^(re|fwd|fw):\s*/i, '').trim();
+}
+
+// LinkedIn utilities
+export function extractLinkedInIdentifier(value) {
+    if (!value) return null;
+    let raw = String(value).trim();
+    if (!raw) return null;
+
+    if (/^https?:/i.test(raw)) {
+        try {
+            const url = new URL(raw);
+            const segments = url.pathname.split('/').filter(Boolean);
+            raw = segments.length ? segments[segments.length - 1] : '';
+        } catch (err) {
+            console.warn('[Specter-Outreach] Invalid LinkedIn URL provided:', value, err);
+            raw = raw.replace(/^https?:\/\//i, '');
+        }
+    }
+
+    raw = raw.replace(/[?#].*$/, '');
+    raw = raw.replace(/^in\//i, '');
+    raw = raw.replace(/^company\//i, '');
+    raw = raw.replace(/^\/+|\/+$/g, '');
+
+    if (!raw) return null;
+    return raw;
+}
+
+export function canonicalizeLinkedInProfileUrl(value) {
+    if (value === undefined || value === null) return null;
+    const raw = String(value).trim();
+    if (!raw) return null;
+    const looksLikeUrl = /linkedin\.com/i.test(raw) || /^https?:/i.test(raw) || /^www\./i.test(raw);
+    const looksLikeSlug = /^in\//i.test(raw) || /^[a-z0-9][a-z0-9-_]{1,100}$/i.test(raw);
+    if (!looksLikeUrl && !looksLikeSlug) return null;
+    const identifier = extractLinkedInIdentifier(raw);
+    if (!identifier) return null;
+    return 'https://www.linkedin.com/in/' + identifier;
+}
+
+export function deriveLinkedInFromAccount(account = {}) {
+    if (!account) return null;
+
+    const directCandidates = [
+        account?.linkedin,
+        account?.profile?.linkedin_url,
+        account?.profile?.linkedinUrl,
+        account?.profile_url,
+        account?.profileUrl,
+        account?.profile_link,
+        account?.profileLink,
+        account?.public_profile_url,
+        account?.publicProfileUrl,
+        account?.url,
+        account?.profile?.url,
+        account?.profile?.profile_url,
+        account?.profile?.profileUrl
+    ];
+
+    for (const candidate of directCandidates) {
+        const normalized = canonicalizeLinkedInProfileUrl(candidate);
+        if (normalized) {
+            return normalized;
+        }
+    }
+
+    const identifierSource = [
+        account?.profile?.public_identifier,
+        account?.profile?.publicIdentifier,
+        account?.public_identifier,
+        account?.publicIdentifier,
+        account?.username,
+        account?.login?.username,
+        account?.handle
+    ];
+
+    for (const candidate of identifierSource) {
+        const slug = extractLinkedInIdentifier(candidate);
+        if (slug) {
+            return 'https://www.linkedin.com/in/' + slug;
+        }
+    }
+
+    return null;
+}

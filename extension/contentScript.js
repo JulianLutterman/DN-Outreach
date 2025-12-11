@@ -99,9 +99,11 @@
                 }
 
                 try {
+                    const forceDeepCheck = reason === 'login' || reason === 'extension-open';
                     const res = await utils.sendMessageWithTimeout('PROCESS_OVERDUE_TASKS', {
                         user: state.userInfo,
-                        reason
+                        reason,
+                        forceDeepCheck
                     }, 20000);
                     if (res?.ok) {
                         state.setSpecterLastOverdueProcessMs(now);

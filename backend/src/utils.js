@@ -62,7 +62,8 @@ export function odataQuote(s) {
 }
 
 export function normalizeSubjectBase(subj = '') {
-    return String(subj).replace(/^(re|fwd|fw):\s*/i, '').trim();
+    // Strips Re:, Fwd:, Fw:, Aw:, Antwort:, Wg:, Betreff:, Tr: (case insensitive)
+    return String(subj).replace(/^((re|fwd|fw|aw|antwort|wg|betreff|tr)(\s*:\s*|\s+))+/i, '').trim();
 }
 
 export async function fetchJSON(url, token, init = {}) {

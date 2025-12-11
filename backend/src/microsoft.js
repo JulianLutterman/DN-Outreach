@@ -67,6 +67,37 @@ export async function hasRecentEmailResponse(contactEmail, token, sinceIso) {
     }
 }
 
+export async function hasConversationResponse(conversationId, token, sinceIso, myAddress) {
+    if (!token || !conversationId) return false;
+
+    try {
+        const url = new URL('https://graph.microsoft.com/v1.0/me/messages');
+        url.searchParams.set('$filter', `conversationId eq ${odataQuote(conversationId)}`);
+        url.searchParams.set('$orderby', 'receivedDateTime desc');
+        url.searchParams.set('$top', '10');
+        url.searchParams.set('$select', 'id,from,receivedDateTime');
+
+        const list = await fetchJSON(url.toString(), token);
+        const values = Array.isArray(list?.value) ? list.value : [];
+        const sinceDate = sinceIso ? new Date(sinceIso) : null;
+
+        return values.some(m => {
+            const fromAddr = (m.from?.emailAddress?.address || '').toLowerCase();
+            const received = new Date(m.receivedDateTime || 0);
+
+            // Check if it's a new message
+            const isNew = !sinceDate || (received > sinceDate);
+            // Check if it's NOT from me (i.e. it's a reply)
+            const isNotMe = myAddress ? (fromAddr !== myAddress.toLowerCase()) : true;
+
+            return isNew && isNotMe;
+        });
+    } catch (err) {
+        console.warn('[Specter-Outreach] Conversation reply lookup failed:', err);
+        return false;
+    }
+}
+
 export async function listConversationMessages(conversationId, token) {
     const url = new URL('https://graph.microsoft.com/v1.0/me/messages');
     url.searchParams.set('$filter', `conversationId eq ${odataQuote(conversationId)}`);

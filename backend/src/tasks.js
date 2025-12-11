@@ -1,7 +1,7 @@
 // background-scripts/tasks.js
 
 import { UNIPILE_API_KEY, UNIPILE_API_URL } from './config.js';
-import { normalizeEmail, normalizeTaskContext, extractFirstName, buildHtmlBodyForBg, applyTemplateReplacements, fetchJSON } from './utils.js';
+import { normalizeEmail, normalizeTaskContext, extractFirstName, buildHtmlBodyForBg, applyTemplateReplacements, fetchJSON, odataQuote, normalizeSubjectBase } from './utils.js';
 import { ensureSupabaseUser, fetchOverdueTasks, fetchUpcomingTasksForUser, deleteSupabaseTask } from './supabase.js';
 import { resolveAnchorMessage, hasRecentEmailResponse } from './microsoft.js';
 import { getLinkedInChats, detectLinkedInReply, runLinkedInTask } from './unipile.js';
@@ -26,7 +26,7 @@ export function resolveTaskLinkedInCandidate(task, context = {}) {
     return null;
 }
 
-export async function hasFounderRespondedForTask(task, { token = null, sinceIso = null, linkedInContext = null } = {}) {
+export async function hasFounderRespondedForTask(task, { token = null, sinceIso = null, linkedInContext = null, forceDeepCheck = false, myAddress = null } = {}) {
     if (!task) return false;
 
     const createdAtRaw = task.created_at || task.createdAt || null;
@@ -34,7 +34,8 @@ export async function hasFounderRespondedForTask(task, { token = null, sinceIso 
     console.log('[Specter-Outreach][Debug] Task creation timestamp', {
         taskId: task.id || null,
         created_at: createdAtRaw,
-        createdIso: createdAtDate && !Number.isNaN(createdAtDate.valueOf()) ? createdAtDate.toISOString() : null
+        createdIso: createdAtDate && !Number.isNaN(createdAtDate.valueOf()) ? createdAtDate.toISOString() : null,
+        forceDeepCheck: !!forceDeepCheck
     });
 
     const context = normalizeTaskContext(task.context);
@@ -45,8 +46,44 @@ export async function hasFounderRespondedForTask(task, { token = null, sinceIso 
     const sinceDate = sinceIso ? new Date(sinceIso) : null;
     const normalizedSinceDate = sinceDate && !Number.isNaN(sinceDate.valueOf()) ? sinceDate : null;
 
+    console.log('[Specter-Outreach][Debug] hasFounderRespondedForTask', {
+        taskId: task.id,
+        contactEmail,
+        forceDeepCheck,
+        hasToken: !!token,
+        myAddress,
+        sinceIso
+    });
+
     const emailPromise = contactEmail
-        ? hasRecentEmailResponse(contactEmail, token, sinceIso)
+        ? (async () => {
+            // Fallback / Standard check
+            const standardEmailCheck = await hasRecentEmailResponse(contactEmail, token, sinceIso);
+            if (standardEmailCheck) return true;
+
+            // Deep check (Conversation + Subject) as fallback
+            if (token && myAddress) {
+                try {
+                    const checkTask = {
+                        ...task,
+                        toList: task.toList || (contactEmail ? [contactEmail] : []),
+                        subject: task.subject || context.subject || ''
+                    };
+                    return await detectReply(
+                        checkTask,
+                        token,
+                        myAddress,
+                        sinceIso,
+                        context.conversationId || null,
+                        context.anchorSubject || task.subject || '',
+                        { linkedInContext }
+                    );
+                } catch (err) {
+                    console.warn('[Specter-Outreach] Deep reply check fallback failed:', err);
+                }
+            }
+            return false;
+        })()
         : Promise.resolve(false);
 
     const linkedinPromise = contactLinkedIn
@@ -128,7 +165,13 @@ export async function processOverdueTasks(payload = {}) {
 export async function processOverdueTasksInternal(payload = {}) {
     const user = payload.user || {};
     const unipileAccountId = payload.unipileAccountId || null;
+    const forceDeepCheck = !!payload.forceDeepCheck;
     const normalizedEmail = normalizeEmail(user.email);
+    console.log('[Specter-Outreach][Debug] processOverdueTasksInternal', {
+        userEmail: normalizedEmail,
+        forceDeepCheck,
+        hasUnipile: !!unipileAccountId
+    });
     if (!normalizedEmail) {
         return { processed: 0, skipped: 0, responded: 0 };
     }
@@ -178,7 +221,9 @@ export async function processOverdueTasksInternal(payload = {}) {
         const responded = await hasFounderRespondedForTask(task, {
             token: tokenForCheck,
             sinceIso,
-            linkedInContext
+            linkedInContext,
+            forceDeepCheck,
+            myAddress: normalizedEmail
         });
         if (responded) {
             await deleteSupabaseTask(task.id);
@@ -481,6 +526,7 @@ export async function executeLinkedInSupabaseTask(task, unipileAccountId = null)
 
 export async function detectReply(task, token, myAddress, sinceIso, conversationId, anchorSubject, options = {}) {
     const since = new Date(sinceIso);
+    console.log('[Specter-Outreach][Debug] detectReply start', { taskId: task.id, sinceIso, conversationId, subject: task.subject, anchorSubject });
 
     if (conversationId) {
         try {
@@ -491,12 +537,15 @@ export async function detectReply(task, token, myAddress, sinceIso, conversation
             url.searchParams.set('$select', 'id,from,receivedDateTime');
             const list = await fetchJSON(url.toString(), token);
             const vals = list.value || [];
-            const someoneElse = vals.some(m => {
+            const someoneElse = vals.find(m => {
                 const fromAddr = (m.from?.emailAddress?.address || '').toLowerCase();
                 const received = new Date(m.receivedDateTime || 0);
                 return received > since && fromAddr && fromAddr !== myAddress;
             });
-            if (someoneElse) return true;
+            if (someoneElse) {
+                console.log('[Specter-Outreach][Debug] Reply detected via conversationId', { msgId: someoneElse.id, from: someoneElse.from });
+                return true;
+            }
         } catch (e) {
             console.warn('[Specter-Outreach] Conversation reply check failed; continuing:', e);
         }
@@ -512,13 +561,17 @@ export async function detectReply(task, token, myAddress, sinceIso, conversation
             urlInbox.searchParams.set('$select', 'id,receivedDateTime');
             const list = await fetchJSON(urlInbox.toString(), token);
             const vals = list.value || [];
-            if (vals.some(m => new Date(m.receivedDateTime || 0) > since)) return true;
+            if (vals.some(m => new Date(m.receivedDateTime || 0) > since)) {
+                console.log('[Specter-Outreach][Debug] Reply detected via Inbox check', { addr });
+                return true;
+            }
         } catch (e) {
             console.warn('[Specter-Outreach] Inbox reply check failed for', addr, e);
         }
     }
 
     const base = normalizeSubjectBase(anchorSubject || task.subject || '');
+    console.log('[Specter-Outreach][Debug] Subject check base:', base);
     if (base) {
         try {
             const urlSearch = new URL('https://graph.microsoft.com/v1.0/me/messages');
@@ -532,13 +585,32 @@ export async function detectReply(task, token, myAddress, sinceIso, conversation
             const meOnThread = (m) => [...(m.toRecipients || []), ...(m.ccRecipients || [])]
                 .some(r => isMe(r.emailAddress?.address || ''));
 
-            const replyFound = vals.some(m => {
+            const replyFound = vals.find(m => {
                 const received = new Date(m.receivedDateTime || 0);
                 const fromAddr = (m.from?.emailAddress?.address || '').toLowerCase();
+                const mBase = normalizeSubjectBase(m.subject || '');
+                const subjOk = mBase && mBase.startsWith(base);
+                // Debug log for potential matches
+                if (mBase.includes(base) || base.includes(mBase)) {
+                    console.log('[Specter-Outreach][Debug] Subject match candidate', {
+                        id: m.id,
+                        subject: m.subject,
+                        mBase,
+                        base,
+                        subjOk,
+                        receivedIso: received.toISOString(),
+                        sinceIso: since.toISOString(),
+                        fromAddr,
+                        isMe: isMe(fromAddr)
+                    });
+                }
                 return received > since && !isMe(fromAddr) && meOnThread(m);
             });
 
-            if (replyFound) return true;
+            if (replyFound) {
+                console.log('[Specter-Outreach][Debug] Reply detected via Subject check', { msgId: replyFound.id, subject: replyFound.subject });
+                return true;
+            }
         } catch (e) {
             console.warn('[Specter-Outreach] Subject $search check failed:', e);
         }
@@ -551,5 +623,6 @@ export async function detectReply(task, token, myAddress, sinceIso, conversation
         console.warn('[Specter-Outreach] LinkedIn reply check failed:', err);
     }
 
+    console.log('[Specter-Outreach][Debug] No reply detected');
     return false;
 }
